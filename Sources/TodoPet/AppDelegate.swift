@@ -225,15 +225,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusTitle()
     }
 
+    /// Mochi's face for the menu bar, drawn with PetArt so it matches the pet on the desktop.
+    /// Cached per mood: the icon only changes when the mood does.
+    private var statusIcons: [Mood: NSImage] = [:]
+
+    private func statusIcon(for mood: Mood) -> NSImage? {
+        if let cached = statusIcons[mood] { return cached }
+        let side: CGFloat = 22
+        // The body sits in roughly x 12…108, y 26…118 of PetArt's 120×120 space; zoom onto it.
+        let region = CGRect(x: 12, y: 26, width: 96, height: 92)
+        let canvas = Canvas { ctx, _ in
+            let k = side / max(region.width, region.height)
+            ctx.scaleBy(x: k, y: k)
+            ctx.translateBy(x: -region.minX, y: -region.minY)
+            // t = 0.6: eyes open (blinks happen early in each cycle), arms at rest.
+            PetArt.draw(&ctx, size: CGSize(width: 120, height: 120), pose: PetPose(mood: mood, t: 0.6))
+        }
+        .frame(width: side, height: side)
+        let renderer = ImageRenderer(content: canvas)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let image = renderer.nsImage else { return nil }
+        image.isTemplate = false
+        statusIcons[mood] = image
+        return image
+    }
+
     private func updateStatusTitle() {
         guard let button = statusItem?.button else { return }
+        button.image = nil
         if let f = brain.focus {
             let left = max(0, Int(f.end.timeIntervalSinceNow))
             button.title = "\(f.isBreak ? "☕" : "🍅") \(left / 60):\(String(format: "%02d", left % 60))"
         } else if let trip = brain.life.state.trip {
             button.title = "🧳 \(DayMath.timeString(trip.back))"
         } else if brain.hasToken {
-            button.title = "\(brain.mood.emoji) \(brain.day.completed.count)/\(max(brain.target, brain.day.planned))"
+            let count = "\(brain.day.completed.count)/\(max(brain.target, brain.day.planned))"
+            if let icon = statusIcon(for: brain.mood) {
+                button.image = icon
+                button.imagePosition = .imageLeading
+                button.title = " " + count
+            } else {
+                button.title = "\(brain.mood.emoji) \(count)"
+            }
+        } else if let icon = statusIcon(for: .normal) {
+            button.image = icon
+            button.imagePosition = .imageOnly
+            button.title = ""
         } else {
             button.title = "🐾"
         }
